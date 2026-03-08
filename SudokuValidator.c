@@ -15,8 +15,6 @@ int valid = 1;
 
 void check_rows() {
 
-    omp_set_num_threads(4);
-
     #pragma omp parallel for schedule(dynamic)
     for(int i = 0; i < 9; i++) {
 
@@ -29,9 +27,9 @@ void check_rows() {
         for(int j = 0; j < 9; j++) {
             int num = sudoku[i][j];
 
-            if(num < 1 || num > 9 || seen[num]) {
+            if(num < 1 || num > 9 || seen[num])
                 local_valid = 0;
-            }
+
             seen[num] = 1;
         }
 
@@ -43,8 +41,6 @@ void check_rows() {
 }
 
 void check_columns() {
-
-    omp_set_num_threads(4);
 
     #pragma omp parallel for schedule(dynamic)
     for(int j = 0; j < 9; j++) {
@@ -58,9 +54,9 @@ void check_columns() {
         for(int i = 0; i < 9; i++) {
             int num = sudoku[i][j];
 
-            if(num < 1 || num > 9 || seen[num]) {
+            if(num < 1 || num > 9 || seen[num])
                 local_valid = 0;
-            }
+
             seen[num] = 1;
         }
 
@@ -71,39 +67,26 @@ void check_columns() {
     }
 }
 
-void check_subgrids() {
+void check_subgrid(int start_row, int start_col) {
 
-    omp_set_num_threads(4);
+    int seen[10] = {0};
+    int local_valid = 1;
 
-    #pragma omp parallel for schedule(dynamic)
-    for(int idx = 0; idx < 9; idx++) {
+    for(int i = 0; i < 3; i++) {
+        for(int j = 0; j < 3; j++) {
 
-        int start_row = (idx / 3) * 3;
-        int start_col = (idx % 3) * 3;
+            int num = sudoku[start_row + i][start_col + j];
 
-        printf("Subgrid ejecutado por TID: %ld\n",
-               syscall(SYS_gettid));
+            if(num < 1 || num > 9 || seen[num])
+                local_valid = 0;
 
-        int seen[10] = {0};
-        int local_valid = 1;
-
-        for(int i = 0; i < 3; i++) {
-            for(int j = 0; j < 3; j++) {
-
-                int num = sudoku[start_row + i][start_col + j];
-
-                if(num < 1 || num > 9 || seen[num]) {
-                    local_valid = 0;
-                }
-
-                seen[num] = 1;
-            }
+            seen[num] = 1;
         }
+    }
 
-        if(!local_valid) {
-            #pragma omp critical
-            valid = 0;
-        }
+    if(!local_valid) {
+        #pragma omp critical
+        valid = 0;
     }
 }
 
@@ -124,9 +107,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    omp_set_nested(1);
-
-
+    /* ===== Abrir archivo ===== */
     int fd = open(argv[1], O_RDONLY);
     if(fd < 0) {
         perror("Error abriendo archivo");
@@ -146,7 +127,17 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    check_subgrids();
+    #pragma omp parallel for schedule(dynamic)
+    for(int idx = 0; idx < 9; idx++) {
+
+        int i = (idx / 3) * 3;
+        int j = (idx % 3) * 3;
+
+        printf("Subgrid ejecutado por TID: %ld\n",
+               syscall(SYS_gettid));
+
+        check_subgrid(i, j);
+    }
 
     pid_t parent_pid = getpid();
     pid_t pid = fork();
@@ -156,8 +147,6 @@ int main(int argc, char *argv[]) {
         sprintf(pid_str, "%d", parent_pid);
         execlp("ps", "ps", "-p", pid_str, "-lLf", NULL);
         exit(0);
-    } else {
-        wait(NULL);
     }
 
     pthread_t tid;
@@ -166,6 +155,8 @@ int main(int argc, char *argv[]) {
 
     printf("Thread principal luego join (TID): %ld\n",
            syscall(SYS_gettid));
+
+    wait(NULL);
 
     check_rows();
 
@@ -182,9 +173,9 @@ int main(int argc, char *argv[]) {
         sprintf(pid_str, "%d", parent_pid);
         execlp("ps", "ps", "-p", pid_str, "-lLf", NULL);
         exit(0);
-    } else {
-        wait(NULL);
     }
+
+    wait(NULL);
 
     munmap(map, 82);
     close(fd);
